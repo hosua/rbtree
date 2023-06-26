@@ -1,0 +1,119 @@
+#!/usr/bin/ruby
+
+require 'colorize'
+require_relative 'parser.rb' 
+
+# Used for making the output pretty
+PREFIX = "├── "
+PREFIX_LAST = "└── "
+PREFIX_STEM = "│   "
+
+# Aliases for colorize 
+String.add_color_alias(:directory, :light_magenta)
+String.add_color_alias(:symlink, :cyan)
+String.add_color_alias(:executable, :light_green)
+
+# ternary operator in ruby, sets DIR_PATH
+ARGV.length == 0 ? (DIR_PATH = ".") : (DIR_PATH = ARGV[0])
+
+class TreeNav
+  def initialize(options={})
+    @cwd = "#{Dir.pwd}"
+    @options = options
+    @dir_count = @file_count = 0
+  end
+
+  attr_accessor :cwd, :options
+
+  def display_tree_statistics
+    print "#{@dir_count} directories"
+    # Only show file count if directory flag is not set
+    if !@options[:directory_only]
+      print ", #{@file_count} files"
+    end
+    print "\n"
+  end
+
+  def chdir(dir)
+    @cwd = dir
+    Dir.chdir(@cwd)
+  end
+
+  def show(dir)
+    # count the top directory '.'
+    @dir_count += 1
+    chdir(dir)
+    def list_folder(dir, depth=1)
+      # pre will either be set to PREFIX or PREFIX_LAST depending
+      # on if it's the last element in its directory.
+      pre = PREFIX 
+      padding = ""
+      entries = Dir.glob("*")
+
+      for x in 1..depth-1 do
+        padding += PREFIX_STEM
+      end
+      
+      entries.sort.each_with_index do |e, idx|
+        # Ignore relative paths to avoid infinite recursion
+        if e == '.' or e == '..'
+          next
+
+        # File is a symlink, don't try to traverse into it (maybe we'll add a flag
+        # for this at some point)
+        elsif File.symlink? e
+          puts "#{padding}#{pre}" + "#{e}".colorize(:symlink) + " -> " + "#{File.readlink(e)}".colorize(:directory)
+
+        # is a directory
+        elsif File.directory? e
+          @dir_count += 1
+          # TODO: This needs to be fixed (it's for output printing, and not doing what 
+          # I need it to)
+          # if idx == entries.length - 1
+          #   pre = PREFIX_LAST
+          # end
+          puts "#{padding}#{pre}" + "#{e}".colorize(:directory)
+          # go up a directory
+          chdir(e)
+          list_folder(e, depth+1)
+          # then back out
+          chdir('..')
+
+        # is a file, and directory_only option is not set
+        elsif File.file? e 
+          @file_count += 1
+          if @options[:directory_only]
+            next
+          end
+          # print the bottom L-angle connector piece since we are at the bottom of the "branch"
+          if idx == entries.length - 1
+            pre = PREFIX_LAST
+          end
+          # print the file name
+          if File.executable? e
+            # color the executable files green
+            puts "#{padding}#{pre}" + "#{e}".colorize(:executable)
+          else
+            # leave the other files white
+            puts "#{padding}#{pre}#{e}"
+          end
+
+        # Something went wrong
+        else 
+          puts "Error: File \"#{e}\" was not a file or a directory."
+          puts "Something must have went wrong. Our current directory is #{Dir.pwd}"
+          exit 1
+        end
+      end
+    end
+
+    puts "#{dir}".colorize(:light_magenta)
+    list_folder(dir)
+    display_tree_statistics
+  end
+end
+
+options = Parser.new.get_options
+
+t = TreeNav.new(options).show(DIR_PATH)
+
